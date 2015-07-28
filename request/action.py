@@ -1,0 +1,2 @@
+def manage (search) :
+    return {}
