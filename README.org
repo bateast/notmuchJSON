@@ -1,0 +1,12 @@
+#+TITLE: Notmuch mail JSON web server
+#+DATE: <2015-07-28 mar.>
+#+AUTHOR: Baptiste
+#+EMAIL: bateast@bat.fr.eu.org
+
+* Notmuch mail
+
+  This web server, based on [[https://www.python.org/][python 3]] [[https://www.djangoproject.com/][django]], offer /JSON/ interface to [[http://notmuchmail.org/][Notmuch mail]] system.
+
+* Django
+
+* Architecture
