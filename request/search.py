@@ -82,14 +82,13 @@ def manage (search) :
                          # 'toplevel_messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_toplevel_messages ()]
         }
 
-    elements = search_function ()
-    global_elements = search_function ()
     if 'global' in search :
+        global_elements = search_function ()
         result ['global'] = {}
         for key in search ['global'] :
             if key in valid_global :
                 result ['global'][key] = valid_global [key] (global_elements)
-    del (global_elements)
+        del (global_elements)
 
     if 'details' in search :
         elements = search_function ()
@@ -100,7 +99,7 @@ def manage (search) :
                 if key in valid_details :
                     result [_count][key] = valid_details [key] (elt)
             _count += 1
-    del (elements)
+        del (elements)
 
     database.close()
 
