@@ -10,3 +10,68 @@
 * Django
 
 * Architecture
+
+** JSON requests
+
+   A JSON request is made etheir through a =GET= or =POST= http request, though the variable 'command'.
+
+   This 'command' may contains a 'search' table and an 'action' table. Each element of those tables are an individual /search/ request or /action/ request.
+
+   : command = { [search = \[ SEARCH_REQUEST_LIST \]] [action = \[ ACTION_REQUEST_LIST \]]}
+   : SEARCH_REQUEST_LIST = SEARCH_REQUEST[, SEARCH_REQUEST_LIST]
+   : ACTION_REQUEST_LIST = ACTION_REQUEST[, ACTION_REQUEST_LIST]
+
+   =SEARCH_REQUEST= and =ACTION_REQUEST= are described below.
+   
+*** Search request
+
+    A /search/ request is aimed at getting elements from a given /reference/. The elements are either messages or threads, depending on given /type/ information in the request.
+
+    A /reference/ is any [[http://notmuchmail.org/manpages/notmuch-search-1/][notmuch-search]] valid request, then base on combination of [[http://notmuchmail.org/manpages/notmuch-search-terms-7/][notmuch-search-terms]].
+
+    The information details list is then passed to the request. There are three levels of details : global ones refering to information on the set of messages – threads matching the search terms, element details refering to information on each element matching the search terms, and finally part details to get information on each sub – part of messages matching the search terms.
+
+    : SEARCH_REQUEST = {[reference = STRING] [, type = {message|thread}] [, global = GLOBAL_SET] [, details = DETAILS_SET] [, parts_details = PARTS_DETAILS_SET]}
+    : *_SET = { [*_ELEMENT_LIST] }
+    : *_ELEMENT_LIST = '*_ELEMENT' [, *ELEMENT_LIST]
+
+    - reference default is ""
+    - type default is "message"
+    - global, details and details_part default are {}
+
+**** global details elements
+
+     GLOBAL_ELEMENT must be of :
+     - tags, when SEARCH_REQUEST ['type'] == "message"
+
+**** details elements
+
+     DETAILS_ELEMENT must be of :
+     - id
+     - thread_id, when SEARCH_REQUEST ['type'] == "message"
+     - tags
+     - authors, when SEARCH_REQUEST ['type'] == "message"
+     - author, when SEARCH_REQUEST ['type'] == "thread"
+     - subject
+     - to, cc, bcc, when SEARCH_REQUEST ['type'] == "message"
+     - date, when SEARCH_REQUEST ['type'] == "message"
+     - dates, when SEARCH_REQUEST ['type'] == "thread", refering to oldest and newest date of messages in the thread
+     - count, when SEARCH_REQUEST ['type'] == "type", refering to the number of message in the thread
+     - message_id, when SEARCH_REQUEST ['type'] == "thread", referering to the set of messages in the thread
+     - parts, when SEARCH_REQUEST ['type'] == "message", needing a PARTS_DETAILS_SET, requesting information on message parts
+
+**** parts details elements
+
+     PARTS_DETAILS_SET must be of :
+     - 'id'
+     - 'charset'
+     - 'maintype', 'subtype'
+     - 'disposition'
+
+**** Examples
+
+     : {"search" : [{"reference": "from:xxx.com and date:19700101..today", "type": "message", "global": ["tags"], "details": ["author", "tags", "to", "parts"], "parts_details": ["id"]}]}
+
+     : {"search" : [{"reference": "tag:inbox and tag:unread", "type": "thread", "details": ["authors", "tags", "dates"]}]}
+
+     : {"search" : [{"reference": "from:xxx.com and date:19700101..today", "type": "message", "global": ["tags"], "details": ["author", "tags", "to", "parts"], "parts_details": ["id"]}, {"reference": "tag:inbox and tag:unread", "type": "thread", "details": ["authors", "tags", "dates"]}]}

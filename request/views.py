@@ -2,44 +2,56 @@ import notmuch
 import sys, json
 from django.http import HttpResponse
 
-import request.search, request.action
+from request import search
+from request import action
 
 def manage (request) :
     response = {
-        'ok' : False,
-        'message' : "request not found"
+        'ok' : False
     }
 
     if request.method == 'GET' :
-        data = request.GET.get ('')
+        try :
+            data = json.loads (request.GET.get ('command'))
+        except :
+            response ['message'] = str (sys.exc_info() [0]) + " on GET 'command' json decoding"
+            return HttpResponse (content = json.dumps(response), content_type = "text/plain")
     elif request.method == 'POST' :
-        data = request.POST.get ('')
+        try :
+            data = json.loads (request.POST.get ('command'))
+        except :
+            response ['message'] = str (sys.exc_info()) + " on POST 'command' json decoding"
+            return HttpResponse (content = json.dumps(response), content_type = "text/plain")
     else :
         response ['message'] = "Only GET and POST http method are accepted"
         return HttpResponse (content = json.dumps(response), content_type = "text/plain")
 
-    response ['search_response'] = []
-    for search in request ['search'] :
-        try :
-            search_response = request.seach.manage (search);
-        except :
-            response ['message'] = sys.exc_info() [0] + " on request " + search
-            return HttpResponse (content = json.dumps(response), content_type = "text/plain")
+    if 'search' in data :
+        response ['search_response'] = []
+        for s in data ['search'] :
+            try :
+                search_response = search.manage (s);
+            except :
+                response ['message'] = str (sys.exc_info()) + " on request " + str (s)
+                return HttpResponse (content = json.dumps(response), content_type = "text/plain")
 
-        response ['search_response'].append ({
-            'request' : search,
-            'response' : search_response
-        })
+            response ['search_response'].append ({
+                'request' : s,
+                'response' : search_response
+            })
 
-    response ['action_response'] = []
-    for action in request ['action'] :
-        try :
-            action_response = request.action.manage (action);
-        except :
-            response ['message'] = sys.exc_info() [0] + " on request " + action
-            return HttpResponse (content = json.dumps(response), content_type = "text/plain")
+    if 'action' in data :
+        response ['action_response'] = []
+        for a in data ['action'] :
+            try :
+                action_response = action.manage (a);
+            except :
+                response ['message'] = str (sys.exc_info() [0]) + " on request " + str (a)
+                return HttpResponse (content = json.dumps(response), content_type = "text/plain")
 
-        response ['action_response'].append ({
-            'request' : action,
-            'response' : action_response
-        })
+            response ['action_response'].append ({
+                'request' : a,
+                'response' : action_response
+            })
+    response ['ok'] = True
+    return HttpResponse (content = json.dumps(response), content_type = "text/plain")
