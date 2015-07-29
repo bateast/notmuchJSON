@@ -16,8 +16,10 @@ Including another URLconf
 from django.conf.urls import include, url
 from django.contrib import admin
 
+from customization.settings import *
+
 import request.views
 
 urlpatterns = [
-    url(r'^(?:/index.html)?(?:\?.*)?$', "request.views.manage", name="request")
+    url(r'^' + BASE_URL + '/?(?:index.html)?(?:\?.*)?$', "request.views.manage", name="request")
 ]
