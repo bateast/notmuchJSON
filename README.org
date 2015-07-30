@@ -78,11 +78,11 @@
      - 'max_count' : INT \\
        the maximum number of elements the search must process before returning
      - 'max_delay' : INT \\
-       the maximum number of seconds the search must last before returning, even if all the elements have not been processed. *Take some margins before server timeout* …
+       the maximum number of seconds the search must last before returning, even if all the elements have not been processed.
 
 **** Examples
 
-     : {"search" : [{"reference": "from:xxx.com and date:19700101..today", "type": "message", "global": ["tags"], "details": ["author", "tags", "to", "parts"], "parts_details": ["id"]}]}
+     : {"search" : [{"reference": "from:xxx.com and date:19700101..today", "type": "message", "global": ["tags"], "details": ["author", "tags", "to", "parts"], "parts_details": ["id"], "options" : {"max_delay" : 20}}]}
 
      : {"search" : [{"reference": "tag:inbox and tag:unread", "type": "thread", "details": ["authors", "tags", "dates"]}]}
 

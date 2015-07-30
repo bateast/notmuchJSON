@@ -4,7 +4,7 @@ from notmuch.messages import Messages
 from notmuch.thread import Thread
 from django.conf import settings
 
-import time, email, datetime
+import time, email, datetime, threading, queue
 
 def to_str (func) :
     return lambda x : str (func (x))
@@ -12,6 +12,40 @@ def to_str_arr (func) :
     return lambda x : [str (y) for y in func (x)]
 def to_str_split (func, sep) :
     return lambda x : str (func (x)).split (sep)
+
+def timeouted_call (func, timeout, lock = None) :
+
+    _t0 = datetime.datetime.now ()
+
+    # do not call func multiple times before it finish
+    result_queue = queue.Queue ()
+    def locked_func () :
+        if lock != None :
+            if not lock.acquire (int (timeout - (datetime.datetime.now () - _t0).total_seconds ())) :
+                return { 'ok' : False,
+                         'message' : "Function already locked"}
+
+        try :
+            result_queue.put (func ())
+        except :
+            if lock != None :
+                lock.release ()
+            raise;
+
+        if lock != None :
+            lock.release ()
+
+    action_thread = threading.Thread (None, locked_func)
+    action_thread.start ()
+    action_thread.join (timeout - (datetime.datetime.now () - _t0).total_seconds ())
+
+    # When call has timeouted (be aware, worker is still working, but no one would care)
+    if action_thread.is_alive () :
+        return { 'ok' : False,
+                 'message' : "Call took to much time"}
+
+    # else get message from woker thread
+    return { 'ok' : True, 'result' : result_queue.get () }
 
 def part_details (part, count = 0, details = {}) :
     valid_details  = {'id' : lambda p : {'type' : "filename", 'value' : p.get_filename()} if p.get_filename() != None else {'type' : "count", 'value' : count},
@@ -46,6 +80,7 @@ def get_parts_details (message, details) :
     return parts
 
 def manage (search) :
+    _t0 = datetime.datetime.now ()
     result = { 'ok' : False }
     database_path = settings.NOTMUCH_DB
     exclude_tags = settings.EXCLUDE_TAGS
@@ -82,39 +117,78 @@ def manage (search) :
                          # 'toplevel_messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_toplevel_messages ()]
         }
 
+
+    if 'options' in search and 'max_delay' in search ['options']:
+        max_delay_present = True
+        max_delay = search ['options']['max_delay']
+        search_lock = threading.Lock ();
+
+    else :
+        max_delay_present = False
+
     if 'global' in search :
-        global_elements = search_function ()
+
+        if max_delay_present :
+            timeouted_result = timeouted_call (search_function,
+                                               max_delay - (datetime.datetime.now() - _t0).total_seconds (),
+                                               search_lock);
+            if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
+                return timeouted_result;
+            global_elements = timeouted_result ['result']
+        else :
+            global_elements = search_function ()
+
         result ['global'] = {}
+        result ['global']['ok'] = True
         for key in search ['global'] :
             if key in valid_global :
-                result ['global'][key] = valid_global [key] (global_elements)
+                if max_delay_present :
+                    timeouted_result = timeouted_call (lambda : valid_global [key] (global_elements),
+                                                       max_delay - (datetime.datetime.now() - _t0).total_seconds (),
+                                                       search_lock);
+                    if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
+                        result ['global']['ok'] = False
+                        result ['global']['message'] = "timeouted"
+                        break;
+                    result ['global'][key] = timeouted_result ['result']
+                else :
+                    result ['global'][key] = valid_global [key] (global_elements)
         del (global_elements)
 
     if 'details' in search :
-        elements = search_function ()
+        result ['details'] = {}
+        result ['details']['ok'] = True
+        if max_delay_present :
+            timeouted_result = timeouted_call (search_function,
+                                               max_delay - (datetime.datetime.now() - _t0).total_seconds (),
+                                               search_lock);
+            if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
+                return timeouted_result;
+            elements = timeouted_result ['result']
+        else :
+            elements = search_function ()
+
         if 'options' in search and 'max_count' in search ['options'] :
             max_count_present = True
             max_count = search ['options']['max_count']
         else :
             max_count_present = False
-        if 'options' in search and 'max_delay' in search ['options']:
-            max_delay_present = True
-            max_delay = search ['options']['max_delay']
-        else :
-            max_delay_present = False
 
         _count = 0
-        _t0 = datetime.datetime.now ()
         for elt in elements :
-            result [_count] = {}
-            for key in search ['details'] :
-                if key in valid_details :
-                    result [_count][key] = valid_details [key] (elt)
-            _count += 1
             if max_count_present and max_count < _count :
+                result ['details']['ok'] = False
+                result ['details']['message'] = "incomplete"
                 break
             if max_delay_present and max_delay < (datetime.datetime.now () - _t0).total_seconds() :
+                result ['details']['ok'] = False
+                result ['details']['message'] = "timeouted"
                 break
+            result ['details'][_count] = {}
+            for key in search ['details'] :
+                if key in valid_details :
+                    result ['details'][_count][key] = valid_details [key] (elt)
+            _count += 1
         del (elements)
 
     database.close()
