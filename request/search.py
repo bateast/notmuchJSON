@@ -4,7 +4,7 @@ from notmuch.messages import Messages
 from notmuch.thread import Thread
 from django.conf import settings
 
-import time, email
+import time, email, datetime
 
 def to_str (func) :
     return lambda x : str (func (x))
@@ -92,13 +92,29 @@ def manage (search) :
 
     if 'details' in search :
         elements = search_function ()
+        if 'options' in search and 'max_count' in search ['options'] :
+            max_count_present = True
+            max_count = search ['options']['max_count']
+        else :
+            max_count_present = False
+        if 'options' in search and 'max_delay' in search ['options']:
+            max_delay_present = True
+            max_delay = search ['options']['max_delay']
+        else :
+            max_delay_present = False
+
         _count = 0
+        _t0 = datetime.datetime.now ()
         for elt in elements :
             result [_count] = {}
             for key in search ['details'] :
                 if key in valid_details :
                     result [_count][key] = valid_details [key] (elt)
             _count += 1
+            if max_count_present and max_count < _count :
+                break
+            if max_delay_present and max_delay < (datetime.datetime.now () - _t0).total_seconds() :
+                break
         del (elements)
 
     database.close()
