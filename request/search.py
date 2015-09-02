@@ -5,6 +5,7 @@ from notmuch.thread import Thread
 from django.conf import settings
 
 import time, email, datetime, threading, queue
+from request.async import timeouted_call
 
 def to_str (func) :
     return lambda x : str (func (x))
@@ -12,40 +13,6 @@ def to_str_arr (func) :
     return lambda x : [str (y) for y in func (x)]
 def to_str_split (func, sep) :
     return lambda x : str (func (x)).split (sep)
-
-def timeouted_call (func, timeout, lock = None) :
-
-    _t0 = datetime.datetime.now ()
-
-    # do not call func multiple times before it finish
-    result_queue = queue.Queue ()
-    def locked_func () :
-        if lock != None :
-            if not lock.acquire (int (timeout - (datetime.datetime.now () - _t0).total_seconds ())) :
-                return { 'ok' : False,
-                         'message' : "Function already locked"}
-
-        try :
-            result_queue.put (func ())
-        except :
-            if lock != None :
-                lock.release ()
-            raise;
-
-        if lock != None :
-            lock.release ()
-
-    action_thread = threading.Thread (None, locked_func)
-    action_thread.start ()
-    action_thread.join (timeout - (datetime.datetime.now () - _t0).total_seconds ())
-
-    # When call has timeouted (be aware, worker is still working, but no one would care)
-    if action_thread.is_alive () :
-        return { 'ok' : False,
-                 'message' : "Call took to much time"}
-
-    # else get message from woker thread
-    return { 'ok' : True, 'result' : result_queue.get () }
 
 def part_details (part, count = 0, details = {}) :
     valid_details  = {'id' : lambda p : {'type' : "filename", 'value' : p.get_filename()} if p.get_filename() != None else {'type' : "count", 'value' : count},
@@ -130,8 +97,7 @@ def manage (search) :
 
         if max_delay_present :
             timeouted_result = timeouted_call (search_function,
-                                               max_delay - (datetime.datetime.now() - _t0).total_seconds (),
-                                               search_lock);
+                                               max_delay - (datetime.datetime.now() - _t0).total_seconds ()).run ();
             if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
                 return timeouted_result;
             global_elements = timeouted_result ['result']
@@ -144,8 +110,8 @@ def manage (search) :
             if key in valid_global :
                 if max_delay_present :
                     timeouted_result = timeouted_call (lambda : valid_global [key] (global_elements),
-                                                       max_delay - (datetime.datetime.now() - _t0).total_seconds (),
-                                                       search_lock);
+                                                       max_delay - (datetime.datetime.now() - _t0).total_seconds ()).run ();
+                    print (timeouted_result)
                     if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
                         result ['global']['ok'] = False
                         result ['global']['message'] = "timeouted"
@@ -160,8 +126,7 @@ def manage (search) :
         result ['details']['ok'] = True
         if max_delay_present :
             timeouted_result = timeouted_call (search_function,
-                                               max_delay - (datetime.datetime.now() - _t0).total_seconds (),
-                                               search_lock);
+                                               max_delay - (datetime.datetime.now() - _t0).total_seconds ()).run ();
             if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
                 return timeouted_result;
             elements = timeouted_result ['result']
