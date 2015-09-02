@@ -52,13 +52,8 @@ def manage (search) :
     database_path = settings.NOTMUCH_DB
     exclude_tags = settings.EXCLUDE_TAGS
 
-    database = notmuch.Database(database_path)
-    query = notmuch.Query (database, search ['reference'] if "reference" in search else "")
-    for tag in exclude_tags :
-        query.exclude_tag (tag)
-
     if not "type" in search or search ['type'] == "message" :
-        search_function = query.search_messages
+        search_function = notmuch.Query.search_messages
         valid_global  = {'tags' : to_str_arr (Messages.collect_tags)}
         valid_details = {'id' : to_str (Message.get_message_id),
                          'thread_id' : to_str (Message.get_thread_id),
@@ -72,7 +67,7 @@ def manage (search) :
                          'parts' : lambda msg : get_parts_details (msg, search ['parts_details'] if 'parts_details' in search else {}),
         }
     elif search ['type'] == "thread" :
-        search_function = query.search_threads
+        search_function = notmuch.Query.search_threads
         valid_global  = {}
         valid_details = {'id' : to_str (Thread.get_thread_id),
                          'authors' : to_str_split (Thread.get_authors, ","),
@@ -81,82 +76,101 @@ def manage (search) :
                          'tags' : to_str_arr (Thread.get_tags),
                          'count' : Thread.get_total_messages,
                          'messages_id' : lambda Thread : [str (msg.get_message_id ()) for msg in Thread.get_messages ()],
-                         # 'toplevel_messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_toplevel_messages ()]
+                         # TODO 'toplevel_messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_toplevel_messages ()]
         }
 
 
     if 'options' in search and 'max_delay' in search ['options']:
         max_delay_present = True
         max_delay = search ['options']['max_delay']
-        search_lock = threading.Lock ();
 
     else :
         max_delay_present = False
 
     if 'global' in search :
-
-        if max_delay_present :
-            timeouted_result = timeouted_call (search_function,
-                                               max_delay - (datetime.datetime.now() - _t0).total_seconds ()).run ();
-            if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
-                return timeouted_result;
-            global_elements = timeouted_result ['result']
-        else :
-            global_elements = search_function ()
-
         result ['global'] = {}
-        result ['global']['ok'] = True
-        for key in search ['global'] :
-            if key in valid_global :
-                if max_delay_present :
-                    timeouted_result = timeouted_call (lambda : valid_global [key] (global_elements),
-                                                       max_delay - (datetime.datetime.now() - _t0).total_seconds ()).run ();
-                    print (timeouted_result)
-                    if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
-                        result ['global']['ok'] = False
-                        result ['global']['message'] = "timeouted"
-                        break;
-                    result ['global'][key] = timeouted_result ['result']
-                else :
-                    result ['global'][key] = valid_global [key] (global_elements)
-        del (global_elements)
+        def global_call () :
+            database = notmuch.Database(database_path)
+            query = notmuch.Query (database, search ['reference'] if "reference" in search else "")
+            for tag in exclude_tags :
+                query.exclude_tag (tag)
+            elements = search_function (query)
+
+            glob = {}
+            glob ['ok'] = True
+            for key in search ['global'] :
+                if key in valid_global :
+                    glob [key] = valid_global [key] (elements)
+
+            del (elements)
+            database.close()
+            return glob
 
     if 'details' in search :
         result ['details'] = {}
-        result ['details']['ok'] = True
+        def details_call () :
+            database = notmuch.Database(database_path)
+            query = notmuch.Query (database, search ['reference'] if "reference" in search else "")
+            for tag in exclude_tags :
+                query.exclude_tag (tag)
+            elements = search_function (query)
+
+            details = {}
+            details ['ok'] = True
+            if 'options' in search and 'max_count' in search ['options'] :
+                max_count_present = True
+                max_count = search ['options']['max_count']
+            else :
+                max_count_present = False
+
+            _count = 0
+            for elt in elements :
+                if max_count_present and max_count < _count :
+                    details ['ok'] = False
+                    details ['message'] = "incomplete"
+                    break
+                if max_delay_present and max_delay < (datetime.datetime.now () - _t0).total_seconds() :
+                    # Ok, don’t run for ages, even if in a background thread
+                    break
+                details [_count] = {}
+                for key in search ['details'] :
+                    if key in valid_details :
+                        details [_count][key] = valid_details [key] (elt)
+                _count += 1
+
+            del (elements)
+            database.close()
+            return details
+
+    if 'global' in search :
         if max_delay_present :
-            timeouted_result = timeouted_call (search_function,
-                                               max_delay - (datetime.datetime.now() - _t0).total_seconds ()).run ();
-            if 'ok' not in timeouted_result or timeouted_result ['ok'] != True :
-                return timeouted_result;
-            elements = timeouted_result ['result']
+            global_thread, global_queue = timeouted_call (global_call,
+                                                          max_delay - (datetime.datetime.now() - _t0).total_seconds ()).async ()
         else :
-            elements = search_function ()
+            result ['global'] = global_call ()
 
-        if 'options' in search and 'max_count' in search ['options'] :
-            max_count_present = True
-            max_count = search ['options']['max_count']
+    if 'details' in search :
+        if max_delay_present :
+            details_thread, details_queue = timeouted_call (details_call,
+                                                            max_delay - (datetime.datetime.now() - _t0).total_seconds ()).async ()
         else :
-            max_count_present = False
+            result ['details'] = details_call ()
 
-        _count = 0
-        for elt in elements :
-            if max_count_present and max_count < _count :
-                result ['details']['ok'] = False
-                result ['details']['message'] = "incomplete"
-                break
-            if max_delay_present and max_delay < (datetime.datetime.now () - _t0).total_seconds() :
-                result ['details']['ok'] = False
-                result ['details']['message'] = "timeouted"
-                break
-            result ['details'][_count] = {}
-            for key in search ['details'] :
-                if key in valid_details :
-                    result ['details'][_count][key] = valid_details [key] (elt)
-            _count += 1
-        del (elements)
-
-    database.close()
+    if max_delay_present :
+        if 'global' in search :
+            global_thread.join (max_delay - (datetime.datetime.now() - _t0).total_seconds ());
+            if global_thread.is_alive () :
+                global_result =  { 'ok' : False, 'message' : "Call took to much time"}
+            else :
+                global_result = global_queue.get ()
+            result ['global'] = global_result
+    if 'details' in search :
+            details_thread.join (max_delay - (datetime.datetime.now() - _t0).total_seconds ());
+            if details_thread.is_alive () :
+                details_result =  { 'ok' : False, 'message' : "Call took to much time"}
+            else :
+                details_result = details_queue.get ()
+            result ['details'] = details_result
 
     result ['ok'] = True
 

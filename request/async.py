@@ -10,7 +10,21 @@ class timeouted_call :
         self.timeout = timeout
 
     def run (self, args = None) :
+        _t0 = datetime.datetime.now ()
 
+        action_thread, result_queue = self.async (args)
+
+        action_thread.join (self.timeout - (datetime.datetime.now () - _t0).total_seconds ())
+
+        # When call has timeouted (be aware, worker is still working, but no one would care)
+        if action_thread.is_alive () :
+            return { 'ok' : False,
+                     'message' : "Call took to much time"}
+
+        # else get message from woker thread
+        return { 'ok' : True, 'result' : result_queue.get () }
+
+    def async (self, args = None) :
         _t0 = datetime.datetime.now ()
         result_queue = queue.Queue ()
 
@@ -28,13 +42,5 @@ class timeouted_call :
 
         action_thread = threading.Thread (None, locked_func)
         action_thread.start ()
-        action_thread.join (self.timeout - (datetime.datetime.now () - _t0).total_seconds ())
 
-        # When call has timeouted (be aware, worker is still working, but no one would care)
-        if action_thread.is_alive () :
-            return { 'ok' : False,
-                     'message' : "Call took to much time"}
-
-        # else get message from woker thread
-        return { 'ok' : True, 'result' : result_queue.get () }
-
+        return action_thread, result_queue
