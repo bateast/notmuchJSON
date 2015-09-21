@@ -5,6 +5,7 @@ from notmuch.thread import Thread
 from django.conf import settings
 
 import time, email, datetime, threading, queue
+from email import policy
 from request.async import timeouted_call
 
 def to_str (func) :
@@ -13,6 +14,28 @@ def to_str_arr (func) :
     return lambda x : [str (y) for y in func (x)]
 def to_str_split (func, sep) :
     return lambda x : str (func (x)).split (sep)
+
+from html.parser import HTMLParser
+class MLStripper(HTMLParser):
+    def __init__(self):
+        self.reset()
+        self.strict = False
+        self.in_style = 0
+        self.convert_charrefs= True
+        self.fed = []
+    def handle_data(self, d):
+        if self.in_style == 0 :
+            self.fed.append(d)
+    def get_data(self):
+        return ''.join(self.fed)
+    def handle_starttag (self, tag, attrs) :
+        if tag == "style" :
+            self.in_style += 1
+    def handle_endtag (self, tag) :
+        if tag == "style" :
+            self.in_style -= 1
+        if self.in_style < 0 :
+            self.in_style = 0
 
 def part_details (part, count = 0, details = {}) :
     valid_details  = {'id' : lambda p : {'type' : "filename", 'value' : p.get_filename()} if p.get_filename() != None else {'type' : "count", 'value' : count},
@@ -52,6 +75,30 @@ def manage (search) :
     database_path = settings.NOTMUCH_DB
     exclude_tags = settings.EXCLUDE_TAGS
 
+    def get_summary_msg (msg) :
+        fp = open(msg.get_filename(), encoding='utf-8', errors='replace')
+        email_msg = email.message_from_file(fp)
+        fp.close()
+
+        for part in email_msg.walk () :
+            if not part.is_multipart () :
+                if part.get_content_type() == "text/html" :
+                    s = MLStripper()
+                    s.feed(part.get_payload ())
+                    txt = s.get_data()
+                else :
+                    txt = part.get_payload ()
+                return txt.replace("\n", " ") [:settings.MAX_HEAD_LEN] + " …"
+        return ""
+
+
+
+    def get_summary_thread (thread) :
+        last_msg = None
+        for msg in thread.get_toplevel_messages () :
+            return get_summary_msg (msg)
+        return ""
+
     if not "type" in search or search ['type'] == "message" :
         search_function = notmuch.Query.search_messages
         valid_global  = {'tags' : to_str_arr (Messages.collect_tags)}
@@ -65,6 +112,7 @@ def manage (search) :
                          'bcc': lambda msg : Message.get_header (msg, "Bcc").split (","),
                          'date': lambda msg : time.strftime("%d %b, %X", time.localtime(msg.get_date())),
                          'parts' : lambda msg : get_parts_details (msg, search ['parts_details'] if 'parts_details' in search else {}),
+                         'head' : get_summary_msg,
         }
     elif search ['type'] == "thread" :
         search_function = notmuch.Query.search_threads
@@ -75,7 +123,8 @@ def manage (search) :
                          'dates' : lambda thread : [time.strftime("%d %b, %X", time.localtime (thread.get_oldest_date())), time.strftime("%d %b, %X", time.localtime (thread.get_newest_date()))],
                          'tags' : to_str_arr (Thread.get_tags),
                          'count' : Thread.get_total_messages,
-                         'messages_id' : lambda Thread : [str (msg.get_message_id ()) for msg in Thread.get_messages ()],
+                         'messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_messages ()],
+                         'head' : get_summary_thread
                          # TODO 'toplevel_messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_toplevel_messages ()]
         }
 
