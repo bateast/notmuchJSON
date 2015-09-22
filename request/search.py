@@ -84,10 +84,10 @@ def manage (search) :
             if not part.is_multipart () :
                 if part.get_content_type() == "text/html" :
                     s = MLStripper()
-                    s.feed(part.get_payload ())
+                    s.feed(part.get_payload (decode=True).decode(errors="replace"))
                     txt = s.get_data()
                 else :
-                    txt = part.get_payload ()
+                    txt = part.get_payload (decode=True).decode(errors="replace")
                 return txt.replace("\n", " ") [:settings.MAX_HEAD_LEN] + " …"
         return ""
 
