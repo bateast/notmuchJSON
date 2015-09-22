@@ -5,7 +5,6 @@ from notmuch.thread import Thread
 from django.conf import settings
 
 import time, email, datetime, threading, queue
-from email import policy
 from request.async import timeouted_call
 
 def to_str (func) :
