@@ -36,12 +36,48 @@ class MLStripper(HTMLParser):
         if self.in_style < 0 :
             self.in_style = 0
 
+def get_content_part (part) :
+    if not part.is_multipart () :
+        if part.get_content_type() == "text/html" :
+            s = MLStripper()
+            s.feed(part.get_payload (decode=True).decode(errors="replace"))
+            txt = s.get_data()
+        else :
+            txt = part.get_payload (decode=True).decode(errors="replace")
+        return txt
+    return "[multipart]"
+
+def get_head_part (part) :
+    return get_content_part (part).replace("\n", " ") [:settings.MAX_HEAD_LEN] + " …"
+
+def get_head_msg (msg) :
+    fp = open(msg.get_filename(), encoding='utf-8', errors='replace')
+    email_msg = email.message_from_file(fp)
+    fp.close()
+    for part in email_msg.walk () :
+        if not part.is_multipart () :
+            return get_head_part (part)
+    return "()"
+
+def get_head_thread (thread) :
+    last_msg = None
+    for msg in thread.get_toplevel_messages () :
+        return get_head_msg (msg)
+    return "<>"
+
+def get_thread_messages_tree (thread) :
+    def get_replies (msg) :
+        return {str(msg.get_message_id ()) : [get_replies (down_msg) for down_msg in msg.get_replies ()]}
+    return [get_replies (top_msg) for top_msg in thread.get_toplevel_messages ()]
+
 def part_details (part, count = 0, details = {}) :
     valid_details  = {'id' : lambda p : {'type' : "filename", 'value' : p.get_filename()} if p.get_filename() != None else {'type' : "count", 'value' : count},
                       'charset': lambda p : p.get_content_charset ("utf8"),
                       'maintype' :  email.message.Message.get_content_maintype ,
                       'subtype' :  email.message.Message.get_content_subtype,
                       'disposition' : lambda p : str (p ['Content-Disposition']).split (";")[0],
+                      'head' : get_head_part,
+                      'content' : get_content_part,
     }
 
     result = {}
@@ -74,30 +110,6 @@ def manage (search) :
     database_path = settings.NOTMUCH_DB
     exclude_tags = settings.EXCLUDE_TAGS
 
-    def get_summary_msg (msg) :
-        fp = open(msg.get_filename(), encoding='utf-8', errors='replace')
-        email_msg = email.message_from_file(fp)
-        fp.close()
-
-        for part in email_msg.walk () :
-            if not part.is_multipart () :
-                if part.get_content_type() == "text/html" :
-                    s = MLStripper()
-                    s.feed(part.get_payload (decode=True).decode(errors="replace"))
-                    txt = s.get_data()
-                else :
-                    txt = part.get_payload (decode=True).decode(errors="replace")
-                return txt.replace("\n", " ") [:settings.MAX_HEAD_LEN] + " …"
-        return ""
-
-
-
-    def get_summary_thread (thread) :
-        last_msg = None
-        for msg in thread.get_toplevel_messages () :
-            return get_summary_msg (msg)
-        return ""
-
     if not "type" in search or search ['type'] == "message" :
         search_function = notmuch.Query.search_messages
         valid_global  = {'tags' : to_str_arr (Messages.collect_tags)}
@@ -111,7 +123,7 @@ def manage (search) :
                          'bcc': lambda msg : Message.get_header (msg, "Bcc").split (","),
                          'date': lambda msg : time.strftime("%d %b, %X", time.localtime(msg.get_date())),
                          'parts' : lambda msg : get_parts_details (msg, search ['parts_details'] if 'parts_details' in search else {}),
-                         'head' : get_summary_msg,
+                         'head' : get_head_msg,
         }
     elif search ['type'] == "thread" :
         search_function = notmuch.Query.search_threads
@@ -122,9 +134,8 @@ def manage (search) :
                          'dates' : lambda thread : [time.strftime("%d %b, %X", time.localtime (thread.get_oldest_date())), time.strftime("%d %b, %X", time.localtime (thread.get_newest_date()))],
                          'tags' : to_str_arr (Thread.get_tags),
                          'count' : Thread.get_total_messages,
-                         'messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_messages ()],
-                         'head' : get_summary_thread
-                         # TODO 'toplevel_messages_id' : lambda thread : [str (msg.get_message_id ()) for msg in thread.get_toplevel_messages ()]
+                         'head' : get_head_thread,
+                         'tree' : get_thread_messages_tree,
         }
 
 
